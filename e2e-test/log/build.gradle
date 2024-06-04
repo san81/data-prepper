@@ -109,6 +109,8 @@ logTestConfigurations.each { testConfiguration ->
             sleep(15 * 1000)
         }
 
+        print('waiting for Data Prepper image complete')
+
         description = testConfiguration.description
         group = 'verification'
         testClassesDirs = sourceSets.integrationTest.output.classesDirs
