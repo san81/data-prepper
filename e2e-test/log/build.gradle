@@ -106,7 +106,7 @@ logTestConfigurations.each { testConfiguration ->
 
         // Wait for Data Prepper image to be ready
         doFirst {
-            sleep(15 * 1000)
+            sleep(50 * 1000)
         }
 
         print('waiting for Data Prepper image complete')
