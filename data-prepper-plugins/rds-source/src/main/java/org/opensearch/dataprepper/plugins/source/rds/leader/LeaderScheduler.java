@@ -11,13 +11,14 @@ import org.opensearch.dataprepper.plugins.source.rds.RdsSourceConfig;
 import org.opensearch.dataprepper.plugins.source.rds.coordination.partition.ExportPartition;
 import org.opensearch.dataprepper.plugins.source.rds.coordination.partition.GlobalState;
 import org.opensearch.dataprepper.plugins.source.rds.coordination.partition.LeaderPartition;
+import org.opensearch.dataprepper.plugins.source.rds.coordination.partition.StreamPartition;
 import org.opensearch.dataprepper.plugins.source.rds.coordination.state.ExportProgressState;
 import org.opensearch.dataprepper.plugins.source.rds.coordination.state.LeaderProgressState;
+import org.opensearch.dataprepper.plugins.source.rds.coordination.state.StreamProgressState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Optional;
 
 public class LeaderScheduler implements Runnable {
@@ -96,9 +97,13 @@ public class LeaderScheduler implements Runnable {
         sourceCoordinator.createPartition(new GlobalState(sourceConfig.getDbIdentifier(), null));
 
         if (sourceConfig.isExportEnabled()) {
-            Instant startTime = Instant.now();
             LOG.debug("Export is enabled. Creating export partition in the source coordination store.");
-            createExportPartition(sourceConfig, startTime);
+            createExportPartition(sourceConfig);
+        }
+
+        if (sourceConfig.isStreamEnabled()) {
+            LOG.debug("Stream is enabled. Creating stream partition in the source coordination store.");
+            createStreamPartition(sourceConfig);
         }
 
         LOG.debug("Update initialization state");
@@ -106,16 +111,21 @@ public class LeaderScheduler implements Runnable {
         leaderProgressState.setInitialized(true);
     }
 
-    private void createExportPartition(RdsSourceConfig sourceConfig, Instant exportTime) {
+    private void createExportPartition(RdsSourceConfig sourceConfig) {
         ExportProgressState progressState = new ExportProgressState();
         progressState.setIamRoleArn(sourceConfig.getAwsAuthenticationConfig().getAwsStsRoleArn());
         progressState.setBucket(sourceConfig.getS3Bucket());
         progressState.setPrefix(sourceConfig.getS3Prefix());
         progressState.setTables(sourceConfig.getTableNames());
         progressState.setKmsKeyId(sourceConfig.getExport().getKmsKeyId());
-        progressState.setExportTime(exportTime.toString());
         ExportPartition exportPartition = new ExportPartition(sourceConfig.getDbIdentifier(), sourceConfig.isCluster(), progressState);
         sourceCoordinator.createPartition(exportPartition);
     }
 
+    private void createStreamPartition(RdsSourceConfig sourceConfig) {
+        final StreamProgressState progressState = new StreamProgressState();
+        progressState.setWaitForExport(sourceConfig.isExportEnabled());
+        StreamPartition streamPartition = new StreamPartition(sourceConfig.getDbIdentifier(), progressState);
+        sourceCoordinator.createPartition(streamPartition);
+    }
 }

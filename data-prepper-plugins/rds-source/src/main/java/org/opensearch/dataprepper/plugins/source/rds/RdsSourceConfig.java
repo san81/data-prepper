@@ -11,6 +11,8 @@ import jakarta.validation.constraints.NotNull;
 import org.opensearch.dataprepper.plugins.source.rds.configuration.AwsAuthenticationConfig;
 import org.opensearch.dataprepper.plugins.source.rds.configuration.EngineType;
 import org.opensearch.dataprepper.plugins.source.rds.configuration.ExportConfig;
+import org.opensearch.dataprepper.plugins.source.rds.configuration.StreamConfig;
+import org.opensearch.dataprepper.plugins.source.rds.configuration.TlsConfig;
 
 import java.util.List;
 
@@ -54,9 +56,6 @@ public class RdsSourceConfig {
     @JsonProperty("acknowledgments")
     private boolean acknowledgments = false;
 
-    /**
-     * S3 bucket for holding both export and stream data
-     */
     @JsonProperty("s3_bucket")
     private String s3Bucket;
 
@@ -70,12 +69,21 @@ public class RdsSourceConfig {
     @Valid
     private ExportConfig exportConfig;
 
+    @JsonProperty("stream")
+    private StreamConfig streamConfig;
+
+    @JsonProperty("authentication")
+    private AuthenticationConfig authenticationConfig;
+
+    @JsonProperty("tls")
+    private TlsConfig tlsConfig;
+
     public String getDbIdentifier() {
         return dbIdentifier;
     }
 
     public boolean isCluster() {
-        return isCluster;
+        return isCluster || isAurora;
     }
 
     public EngineType getEngine() {
@@ -116,5 +124,37 @@ public class RdsSourceConfig {
 
     public boolean isExportEnabled() {
         return exportConfig != null;
+    }
+
+    public StreamConfig getStream() {
+        return streamConfig;
+    }
+
+    public boolean isStreamEnabled() {
+        return streamConfig != null;
+    }
+
+    public TlsConfig getTlsConfig() {
+        return tlsConfig;
+    }
+
+    public AuthenticationConfig getAuthenticationConfig() {
+        return this.authenticationConfig;
+    }
+
+    public static class AuthenticationConfig {
+        @JsonProperty("username")
+        private String username;
+
+        @JsonProperty("password")
+        private String password;
+
+        public String getUsername() {
+            return username;
+        }
+
+        public String getPassword() {
+            return password;
+        }
     }
 }
