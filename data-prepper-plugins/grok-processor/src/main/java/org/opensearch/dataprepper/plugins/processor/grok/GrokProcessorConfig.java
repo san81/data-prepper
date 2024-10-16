@@ -9,6 +9,8 @@ import com.fasterxml.jackson.annotation.JsonClassDescription;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
 
 import java.util.Collections;
 import java.util.List;
@@ -47,6 +49,8 @@ public class GrokProcessorConfig {
     static final String DEFAULT_TARGET_KEY = null;
 
     @JsonProperty(MATCH)
+    @NotEmpty
+    @NotNull
     @JsonPropertyDescription("Specifies which keys should match specific patterns. " +
             "Each key is a source field. The value is a list of possible grok patterns to match on. " +
             "The <code>grok</code> processor will extract values from the first match for each field. " +
@@ -57,7 +61,7 @@ public class GrokProcessorConfig {
     @JsonPropertyDescription("Specifies a parent-level key used to store all captures. Default value is <code>null</code> which will write captures into the root of the event.")
     private String targetKey = DEFAULT_TARGET_KEY;
 
-    @JsonProperty(BREAK_ON_MATCH)
+    @JsonProperty(value = BREAK_ON_MATCH, defaultValue = "true")
     @JsonPropertyDescription("Specifies whether to match all patterns (<code>false</code>) or stop once the first successful " +
             "match is found (<code>true</code>). Default is <code>true</code>.")
     private boolean breakOnMatch = DEFAULT_BREAK_ON_MATCH;
@@ -66,7 +70,7 @@ public class GrokProcessorConfig {
     @JsonPropertyDescription("Enables the preservation of <code>null</code> captures from the processed output. Default is <code>false</code>.")
     private boolean keepEmptyCaptures = DEFAULT_KEEP_EMPTY_CAPTURES;
 
-    @JsonProperty(NAMED_CAPTURES_ONLY)
+    @JsonProperty(value = NAMED_CAPTURES_ONLY, defaultValue = "true")
     @JsonPropertyDescription("Specifies whether to keep only named captures. Default is <code>true</code>.")
     private boolean namedCapturesOnly = DEFAULT_NAMED_CAPTURES_ONLY;
 
