@@ -1,27 +1,18 @@
 package org.opensearch.dataprepper.plugins.source.jira;
 
-import com.google.common.annotations.VisibleForTesting;
-import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.dataprepper.metrics.PluginMetrics;
 import org.opensearch.dataprepper.plugins.source.jira.exception.BadRequestException;
-import org.opensearch.dataprepper.plugins.source.jira.exception.UnAuthorizedException;
 import org.opensearch.dataprepper.plugins.source.jira.models.IssueBean;
 import org.opensearch.dataprepper.plugins.source.jira.models.SearchResults;
-import org.opensearch.dataprepper.plugins.source.jira.rest.auth.JiraAuthConfig;
+import org.opensearch.dataprepper.plugins.source.jira.rest.JiraRestClient;
 import org.opensearch.dataprepper.plugins.source.jira.utils.JiraConfigHelper;
 import org.opensearch.dataprepper.plugins.source.jira.utils.JiraContentType;
 import org.opensearch.dataprepper.plugins.source.source_crawler.model.ItemInfo;
-import org.springframework.http.ResponseEntity;
 import org.springframework.util.CollectionUtils;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriComponentsBuilder;
 
 import javax.inject.Named;
-import java.net.URI;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,6 +25,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.CREATED;
 import static org.opensearch.dataprepper.logging.DataPrepperMarkers.NOISY;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.AUTHORIZATION_ERROR_CODE;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.BAD_REQUEST_EXCEPTION;
@@ -45,16 +37,17 @@ import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.EXP
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.FIFTY;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.GREATER_THAN_EQUALS;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.ISSUE_KEY;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.ISSUE_TYPE_IN;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.JQL_FIELD;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.KEY;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.LIVE;
+
+import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.NAME;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.MAX_RESULT;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.OAUTH2;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.PREFIX;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.PROJECT;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.PROJECT_IN;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.PROJECT_KEY;
+
+import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.PROJECT_NAME;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.RATE_LIMIT;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.REST_API_FETCH_ISSUE;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.REST_API_SEARCH;
@@ -66,6 +59,14 @@ import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.SUF
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.TOKEN_EXPIRED;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.UPDATED;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants._PROJECT;
+import static org.opensearch.dataprepper.plugins.source.jira.utils.JqlConstants.CLOSING_ROUND_BRACKET;
+import static org.opensearch.dataprepper.plugins.source.jira.utils.JqlConstants.DELIMITER;
+import static org.opensearch.dataprepper.plugins.source.jira.utils.JqlConstants.GREATER_THAN_EQUALS;
+import static org.opensearch.dataprepper.plugins.source.jira.utils.JqlConstants.ISSUE_TYPE_IN;
+import static org.opensearch.dataprepper.plugins.source.jira.utils.JqlConstants.PREFIX;
+import static org.opensearch.dataprepper.plugins.source.jira.utils.JqlConstants.PROJECT_IN;
+import static org.opensearch.dataprepper.plugins.source.jira.utils.JqlConstants.STATUS_IN;
+import static org.opensearch.dataprepper.plugins.source.jira.utils.JqlConstants.SUFFIX;
 
 
 /**
@@ -76,34 +77,21 @@ import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants._PR
 @Named
 public class JiraService {
 
-    private static final String ISSUES_REQUESTED = "issuesRequested";
-    private static final String TICKET_FETCH_LATENCY_TIMER = "ticketFetchLatency";
-    private static final String SEARCH_CALL_LATENCY_TIMER = "searchCallLatency";
+
+    public static final String CONTENT_TYPE = "ContentType";
     private static final String SEARCH_RESULTS_FOUND = "searchResultsFound";
     private static final Map<String, String> jiraProjectCache = new ConcurrentHashMap<>();
-    private final RestTemplate restTemplate;
-    private final JiraAuthConfig authConfig;
+
     private final JiraSourceConfig jiraSourceConfig;
-    private final Counter issuesRequestedCounter;
+    private final JiraRestClient jiraRestClient;
     private final Counter searchResultsFoundCounter;
-    private final Timer ticketFetchLatencyTimer;
-    private final Timer searchCallLatencyTimer;
     private final PluginMetrics jiraPluginMetrics = PluginMetrics.fromNames("jiraService", "aws");
-    private int sleepTimeMultiplier = 1000;
 
 
-    public JiraService(RestTemplate restTemplate,
-                       JiraSourceConfig jiraSourceConfig,
-                       JiraAuthConfig authConfig) {
-        this.restTemplate = restTemplate;
+    public JiraService(JiraSourceConfig jiraSourceConfig, JiraRestClient jiraRestClient) {
         this.jiraSourceConfig = jiraSourceConfig;
-
-        issuesRequestedCounter = jiraPluginMetrics.counter(ISSUES_REQUESTED);
-        ticketFetchLatencyTimer = jiraPluginMetrics.timer(TICKET_FETCH_LATENCY_TIMER);
-        searchResultsFoundCounter = jiraPluginMetrics.counter(SEARCH_RESULTS_FOUND);
-        searchCallLatencyTimer = jiraPluginMetrics.timer(SEARCH_CALL_LATENCY_TIMER);
-        this.authConfig = authConfig;
-
+        this.jiraRestClient = jiraRestClient;
+        this.searchResultsFoundCounter = jiraPluginMetrics.counter(SEARCH_RESULTS_FOUND);
     }
 
     /**
@@ -125,7 +113,10 @@ public class JiraService {
             ItemInfo itemInfo = createItemInfo(_PROJECT + key, metadata);
             itemInfoQueue.add(itemInfo);
         });
+    }
 
+    public String getIssue(String issueKey) {
+        return jiraRestClient.getIssue(issueKey);
     }
 
     /**
@@ -141,7 +132,7 @@ public class JiraService {
         int total;
         int startAt = 0;
         do {
-            SearchResults searchIssues = getAllIssues(jql, startAt, configuration);
+            SearchResults searchIssues = jiraRestClient.getAllIssues(jql, startAt, configuration);
             List<IssueBean> issueList = new ArrayList<>(searchIssues.getIssues());
             total = searchIssues.getTotal();
             startAt += searchIssues.getIssues().size();
@@ -149,7 +140,6 @@ public class JiraService {
         } while (startAt < total);
         searchResultsFoundCounter.increment(total);
         log.info("Number of tickets found in search api call: {}", total);
-
     }
 
     /**
@@ -171,81 +161,6 @@ public class JiraService {
         });
     }
 
-    /**
-     * Method to get Issues.
-     *
-     * @param jql           input parameter.
-     * @param startAt       the start at
-     * @param configuration input parameter.
-     * @return InputStream input stream
-     */
-    @Timed(SEARCH_CALL_LATENCY_TIMER)
-    public SearchResults getAllIssues(StringBuilder jql, int startAt,
-                                      JiraSourceConfig configuration) {
-
-        String url = configuration.getAccountUrl() + REST_API_SEARCH;
-        if (configuration.getAuthType().equals(OAUTH2)) {
-            url = authConfig.getUrl() + REST_API_SEARCH;
-        }
-
-        URI uri = UriComponentsBuilder.fromHttpUrl(url)
-                .queryParam(MAX_RESULT, FIFTY)
-                .queryParam(START_AT, startAt)
-                .queryParam(JQL_FIELD, jql)
-                .queryParam(EXPAND_FIELD, EXPAND_VALUE)
-                .buildAndExpand().toUri();
-        return invokeRestApi(uri, SearchResults.class).getBody();
-    }
-
-    /**
-     * Gets issue.
-     *
-     * @param issueKey the item info
-     * @return the issue
-     */
-    @Timed(TICKET_FETCH_LATENCY_TIMER)
-    public String getIssue(String issueKey) {
-        issuesRequestedCounter.increment();
-        String url = authConfig.getUrl() + REST_API_FETCH_ISSUE + "/" + issueKey;
-        URI uri = UriComponentsBuilder.fromHttpUrl(url).buildAndExpand().toUri();
-        return invokeRestApi(uri, String.class).getBody();
-    }
-
-    private <T> ResponseEntity<T> invokeRestApi(URI uri, Class<T> responseType) {
-
-        int retryCount = 0;
-        while (retryCount < RETRY_ATTEMPT) {
-            try {
-                return restTemplate.getForEntity(uri, responseType);
-            } catch (HttpClientErrorException ex) {
-                int statusCode = ex.getRawStatusCode();
-                String statusMessage = ex.getMessage();
-                log.error("An exception has occurred while getting response from Jira search API  {}", ex.getMessage(), ex);
-                if (statusCode == AUTHORIZATION_ERROR_CODE) {
-                    throw new UnAuthorizedException(statusMessage);
-                } else if (statusCode == TOKEN_EXPIRED) {
-                    log.error(NOISY, "Token expired. We will try to renew the tokens now", ex);
-                    authConfig.renewCredentials();
-                } else if (statusCode == RATE_LIMIT) {
-                    log.error(NOISY, "Hitting API rate limit. Backing off with sleep timer.", ex);
-                    try {
-                        Thread.sleep((long) RETRY_ATTEMPT_SLEEP_TIME.get(retryCount) * sleepTimeMultiplier);
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException("Sleep in the retry attempt got interrupted", e);
-                    }
-                }
-            }
-            retryCount++;
-        }
-        String errorMessage = String.format("Exceeded max retry attempts. Failed to execute the Rest API call %s", uri.toString());
-        log.error(errorMessage);
-        throw new RuntimeException(errorMessage);
-    }
-
-    @VisibleForTesting
-    public void setSleepTimeMultiplier(int multiplier) {
-        sleepTimeMultiplier = multiplier;
-    }
 
     /**
      * Method for creating Issue Filter Criteria.
@@ -298,7 +213,8 @@ public class JiraService {
         if (!badFilters.isEmpty()) {
             String filters = String.join("\"" + badFilters + "\"", ", ");
             log.error("One or more invalid project keys found in filter configuration: {}", badFilters);
-            throw new BadRequestException(BAD_REQUEST_EXCEPTION
+            throw new BadRequestException("Bad request exception occurred " +
+                    "Invalid project key found in filter configuration for "
                     + filters);
         }
     }
