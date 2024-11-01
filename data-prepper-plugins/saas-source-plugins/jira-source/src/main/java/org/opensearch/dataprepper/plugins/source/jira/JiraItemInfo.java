@@ -17,7 +17,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.CONTENT_TYPE;
+import static org.opensearch.dataprepper.plugins.source.jira.JiraService.CONTENT_TYPE;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.CREATED;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.ISSUE_KEY;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.KEY;

@@ -25,38 +25,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.CREATED;
-import static org.opensearch.dataprepper.logging.DataPrepperMarkers.NOISY;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.AUTHORIZATION_ERROR_CODE;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.BAD_REQUEST_EXCEPTION;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.CLOSING_ROUND_BRACKET;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.CONTENT_TYPE;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.DELIMITER;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.EXPAND_FIELD;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.EXPAND_VALUE;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.FIFTY;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.GREATER_THAN_EQUALS;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.ISSUE_KEY;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.KEY;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.LIVE;
-
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.NAME;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.MAX_RESULT;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.OAUTH2;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.PREFIX;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.PROJECT;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.PROJECT_KEY;
-
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.PROJECT_NAME;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.RATE_LIMIT;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.REST_API_FETCH_ISSUE;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.REST_API_SEARCH;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.RETRY_ATTEMPT;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.RETRY_ATTEMPT_SLEEP_TIME;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.START_AT;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.STATUS_IN;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.SUFFIX;
-import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.TOKEN_EXPIRED;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.UPDATED;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants._PROJECT;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.JqlConstants.CLOSING_ROUND_BRACKET;

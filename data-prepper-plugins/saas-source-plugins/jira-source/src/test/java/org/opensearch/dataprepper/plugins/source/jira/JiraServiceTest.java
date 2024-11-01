@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -112,6 +113,8 @@ public class JiraServiceTest {
         JiraSourceConfig jiraSourceConfig = createJiraConfiguration(BASIC, issueType, issueStatus, projectKey);
         JiraService jiraService = new JiraService(jiraSourceConfig, jiraRestClient);
         assertNotNull(jiraService);
+        when(jiraRestClient.getIssue(anyString())).thenReturn("test String");
+        assertNotNull(jiraService.getIssue("test Key"));
     }
 
     @Test
@@ -207,91 +210,6 @@ public class JiraServiceTest {
         assertThrows(RuntimeException.class, () -> jiraService.getJiraEntities(jiraSourceConfig, timestamp, itemInfoQueue));
     }
 
-
-    @Test
-    public void testGetAllIssuesBasic() throws JsonProcessingException {
-        List<String> issueType = new ArrayList<>();
-        List<String> issueStatus = new ArrayList<>();
-        List<String> projectKey = new ArrayList<>();
-        issueType.add("Task");
-        JiraSourceConfig jiraSourceConfig = createJiraConfiguration(BASIC, issueType, issueStatus, projectKey);
-        JiraService jiraService = new JiraService(restTemplate, jiraSourceConfig, authConfig);
-        SearchResults mockSearchResults = mock(SearchResults.class);
-        doReturn(new ResponseEntity<>(mockSearchResults, HttpStatus.OK)).when(restTemplate).getForEntity(any(URI.class), any(Class.class));
-        SearchResults results = jiraService.getAllIssues(jql, 0, jiraSourceConfig);
-        assertNotNull(results);
-    }
-
-    @Test
-    public void testGetAllIssuesOauth2() throws JsonProcessingException {
-        List<String> issueType = new ArrayList<>();
-        List<String> issueStatus = new ArrayList<>();
-        List<String> projectKey = new ArrayList<>();
-        issueType.add("Task");
-        JiraSourceConfig jiraSourceConfig = createJiraConfiguration(OAUTH2, issueType, issueStatus, projectKey);
-        JiraService jiraService = new JiraService(restTemplate, jiraSourceConfig, authConfig);
-        SearchResults mockSearchResults = mock(SearchResults.class);
-        doReturn("http://mock-service.jira.com").when(authConfig).getUrl();
-        doReturn(new ResponseEntity<>(mockSearchResults, HttpStatus.OK)).when(restTemplate).getForEntity(any(URI.class), any(Class.class));
-        SearchResults results = jiraService.getAllIssues(jql, 0, jiraSourceConfig);
-        assertNotNull(results);
-    }
-
-    private JiraSourceConfig createJiraConfiguration(String auth_type, List<String> issueType, List<String> issueStatus, List<String> projectKey) throws JsonProcessingException {
-        ObjectMapper objectMapper = new ObjectMapper();
-        Map<String, String> connectorCredentialsMap = new HashMap<>();
-        connectorCredentialsMap.put("auth_type", auth_type);
-
-        Map<String, Object> jiraSourceConfigMap = new HashMap<>();
-        jiraSourceConfigMap.put("account_url", ACCESSIBLE_RESOURCES);
-        jiraSourceConfigMap.put("connector_credentials", connectorCredentialsMap);
-        jiraSourceConfigMap.put("issue_types", issueType);
-        jiraSourceConfigMap.put("statuses", issueStatus);
-        jiraSourceConfigMap.put("projects", projectKey);
-
-
-        String jiraSourceConfigJsonString = objectMapper.writeValueAsString(jiraSourceConfigMap);
-        return objectMapper.readValue(jiraSourceConfigJsonString, JiraSourceConfig.class);
-    }
-
-    @Test
-    void testInvokeRestApiTokenExpiredInterruptException() throws JsonProcessingException, InterruptedException {
-        List<String> issueType = new ArrayList<>();
-        List<String> issueStatus = new ArrayList<>();
-        List<String> projectKey = new ArrayList<>();
-        JiraSourceConfig jiraSourceConfig = createJiraConfiguration(BASIC, issueType, issueStatus, projectKey);
-        JiraService jiraService = new JiraService(restTemplate, jiraSourceConfig, authConfig);
-        when(authConfig.getUrl()).thenReturn("https://example.com/rest/api/2/issue/key");
-        when(restTemplate.getForEntity(any(URI.class), any(Class.class))).thenThrow(new HttpClientErrorException(HttpStatus.TOO_MANY_REQUESTS));
-        jiraService.setSleepTimeMultiplier(100000);
-
-        Thread testThread = new Thread(() -> {
-            assertThrows(InterruptedException.class, () -> {
-                try {
-                    jiraService.getIssue("key");
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            });
-        });
-        testThread.start();
-        Thread.sleep(100);
-        testThread.interrupt();
-    }
-
-    @ParameterizedTest
-    @MethodSource("provideHttpStatusCodesWithExceptionClass")
-    void testInvokeRestApiTokenExpired(HttpStatus statusCode, Class expectedExceptionType) throws JsonProcessingException {
-        List<String> issueType = new ArrayList<>();
-        List<String> issueStatus = new ArrayList<>();
-        List<String> projectKey = new ArrayList<>();
-        JiraSourceConfig jiraSourceConfig = createJiraConfiguration(BASIC, issueType, issueStatus, projectKey);
-        JiraService jiraService = new JiraService(restTemplate, jiraSourceConfig, authConfig);
-        jiraService.setSleepTimeMultiplier(1);
-        when(authConfig.getUrl()).thenReturn("https://example.com/rest/api/2/issue/key");
-        when(restTemplate.getForEntity(any(URI.class), any(Class.class))).thenThrow(new HttpClientErrorException(statusCode));
-        assertThrows(expectedExceptionType, () -> jiraService.getIssue("key"));
-    }
 
     private IssueBean createIssueBean(boolean nullFields, boolean createdNull) {
         IssueBean issue1 = new IssueBean();
