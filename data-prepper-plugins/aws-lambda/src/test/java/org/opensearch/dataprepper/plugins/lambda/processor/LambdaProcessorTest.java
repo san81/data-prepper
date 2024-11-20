@@ -42,14 +42,11 @@ import software.amazon.awssdk.services.lambda.LambdaAsyncClient;
 import software.amazon.awssdk.services.lambda.model.InvokeRequest;
 import software.amazon.awssdk.services.lambda.model.InvokeResponse;
 
-import java.io.InputStream;
 import java.lang.reflect.Field;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -63,7 +60,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -81,9 +77,6 @@ public class LambdaProcessorTest {
     private AwsAuthenticationOptions awsAuthenticationOptions;
 
     @Mock
-    private Buffer bufferMock;
-
-    @Mock
     private PluginFactory pluginFactory;
 
     @Mock
@@ -94,10 +87,6 @@ public class LambdaProcessorTest {
 
     @Mock
     private ExpressionEvaluator expressionEvaluator;
-
-    @Mock
-    private InputCodec responseCodec;
-
 
     @Mock
     private Counter numberOfRecordsSuccessCounter;
@@ -136,7 +125,7 @@ public class LambdaProcessorTest {
     }
 
     @BeforeEach
-    public void setUp() throws Exception {
+    public void setUp() {
         MockitoAnnotations.openMocks(this);
 
         when(pluginSetting.getName()).thenReturn("testProcessor");
@@ -415,8 +404,6 @@ public class LambdaProcessorTest {
     @ValueSource(strings = {"lambda-processor-success-config.yaml"})
     public void testConvertLambdaResponseToEvent_WithEqualEventCounts_SuccessfulProcessing(String configFileName)
             throws Exception {
-        // Arrange
-
 
         // Mock LambdaResponse with a valid payload containing two events
         String payloadString = "[{\"key\":\"value1\"}, {\"key\":\"value2\"}]";
@@ -424,105 +411,49 @@ public class LambdaProcessorTest {
         when(invokeResponse.payload()).thenReturn(sdkBytes);
         when(invokeResponse.statusCode()).thenReturn(200); // Success status code
 
-        // Mock the responseCodec.parse to add two events
-        doAnswer(invocation -> {
-            invocation.getArgument(0);
-            @SuppressWarnings("unchecked")
-            Consumer<Record<Event>> consumer = invocation.getArgument(1);
-            Event parsedEvent1 = mock(Event.class);
-            Event parsedEvent2 = mock(Event.class);
-            consumer.accept(new Record<>(parsedEvent1));
-            consumer.accept(new Record<>(parsedEvent2));
-            return null;
-        }).when(responseCodec).parse(any(InputStream.class), any(Consumer.class));
-
-        // Mock buffer with two original events
-        Event originalEvent1 = mock(Event.class);
-        Event originalEvent2 = mock(Event.class);
-        DefaultEventHandle eventHandle = mock(DefaultEventHandle.class);
-        AcknowledgementSet acknowledgementSet = mock(AcknowledgementSet.class);
-        when(eventHandle.getAcknowledgementSet()).thenReturn(acknowledgementSet);
-
-        when(originalEvent1.getEventHandle()).thenReturn(eventHandle);
-        when(originalEvent2.getEventHandle()).thenReturn(eventHandle);
-        Record<Event> originalRecord1 = new Record<>(originalEvent1);
-        Record<Event> originalRecord2 = new Record<>(originalEvent2);
-        List<Record<Event>> originalRecords = Arrays.asList(originalRecord1, originalRecord2);
-        when(bufferMock.getRecords()).thenReturn(originalRecords);
-        when(bufferMock.getEventCount()).thenReturn(2);
+        List<Record<Event>> originalRecords = getSampleEventRecords(2);
+        LambdaProcessorConfig lambdaProcessorConfig = createLambdaConfigurationFromYaml(configFileName);
+        Buffer buffer = new InMemoryBuffer(lambdaProcessorConfig.getBatchOptions().getKeyName());
+        originalRecords.forEach(buffer::addRecord);
 
         // Act
-        LambdaProcessorConfig lambdaProcessorConfig = createLambdaConfigurationFromYaml(configFileName);
         LambdaProcessor lambdaProcessor = new LambdaProcessor(pluginFactory, pluginSetting, lambdaProcessorConfig,
                 awsCredentialsSupplier, expressionEvaluator);
-        List<Record<Event>> resultRecords = lambdaProcessor.convertLambdaResponseToEvent(bufferMock,
+        List<Record<Event>> resultRecords = lambdaProcessor.convertLambdaResponseToEvent(buffer,
                 invokeResponse);
 
         // Assert
         assertEquals(2, resultRecords.size(), "ResultRecords should contain two records.");
+        assertEquals(2, originalRecords.size(), "OriginalRecords shouldn't be altered.");
         // Verify that failure tags are not added since it's a successful response
-        verify(originalEvent1, never()).getMetadata();
-        verify(originalEvent2, never()).getMetadata();
+        for (Record<Event> record : resultRecords) {
+            EventMetadata metadata = record.getData().getMetadata();
+            assertEquals(0, metadata.getTags().size());
+        }
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"lambda-processor-unequal-success-config.yaml"})
     public void testConvertLambdaResponseToEvent_WithUnequalEventCounts_SuccessfulProcessing(String configFileName)
             throws Exception {
-        // Arrange
-        // Set responseEventsMatch to false
 
-
+        InvokeResponse invokeResponse = mock(InvokeResponse.class);
         // Mock LambdaResponse with a valid payload containing three events
         String payloadString = "[{\"key\":\"value1\"}, {\"key\":\"value2\"}, {\"key\":\"value3\"}]";
         SdkBytes sdkBytes = SdkBytes.fromByteArray(payloadString.getBytes());
         when(invokeResponse.payload()).thenReturn(sdkBytes);
         when(invokeResponse.statusCode()).thenReturn(200); // Success status code
 
-        // Mock the responseCodec.parse to add three parsed events
-        doAnswer(invocation -> {
-            invocation.getArgument(0);
-            @SuppressWarnings("unchecked")
-            Consumer<Record<Event>> consumer = invocation.getArgument(1);
-
-            // Create and add three mocked parsed events
-            Event parsedEvent1 = mock(Event.class);
-            Event parsedEvent2 = mock(Event.class);
-            Event parsedEvent3 = mock(Event.class);
-            consumer.accept(new Record<>(parsedEvent1));
-            consumer.accept(new Record<>(parsedEvent2));
-            consumer.accept(new Record<>(parsedEvent3));
-
-            return null;
-        }).when(responseCodec).parse(any(InputStream.class), any(Consumer.class));
-
-        // Mock buffer with two original events
-        Event originalEvent1 = mock(Event.class);
-        EventMetadata originalMetadata1 = mock(EventMetadata.class);
-        when(originalEvent1.getMetadata()).thenReturn(originalMetadata1);
-
-        Event originalEvent2 = mock(Event.class);
-        EventMetadata originalMetadata2 = mock(EventMetadata.class);
-        when(originalEvent2.getMetadata()).thenReturn(originalMetadata2);
-
-        DefaultEventHandle eventHandle = mock(DefaultEventHandle.class);
-        AcknowledgementSet acknowledgementSet = mock(AcknowledgementSet.class);
-        when(eventHandle.getAcknowledgementSet()).thenReturn(acknowledgementSet);
-
-        when(originalEvent1.getEventHandle()).thenReturn(eventHandle);
-        when(originalEvent2.getEventHandle()).thenReturn(eventHandle);
-
-        Record<Event> originalRecord1 = new Record<>(originalEvent1);
-        Record<Event> originalRecord2 = new Record<>(originalEvent2);
-        List<Record<Event>> originalRecords = Arrays.asList(originalRecord1, originalRecord2);
-        when(bufferMock.getRecords()).thenReturn(originalRecords);
-        when(bufferMock.getEventCount()).thenReturn(2);
+        int randomCount = (int) (Math.random() * 10) + 4;
+        LambdaProcessorConfig lambdaProcessorConfig = createLambdaConfigurationFromYaml(configFileName);
+        List<Record<Event>> originalRecords = getSampleEventRecords(randomCount);
+        Buffer buffer = new InMemoryBuffer(lambdaProcessorConfig.getBatchOptions().getKeyName());
+        originalRecords.forEach(buffer::addRecord);
 
         // Act
-        LambdaProcessorConfig lambdaProcessorConfig = createLambdaConfigurationFromYaml(configFileName);
         LambdaProcessor lambdaProcessor = new LambdaProcessor(pluginFactory, pluginSetting, lambdaProcessorConfig,
                 awsCredentialsSupplier, expressionEvaluator);
-        List<Record<Event>> resultRecords = lambdaProcessor.convertLambdaResponseToEvent(bufferMock, invokeResponse);
+        List<Record<Event>> resultRecords = lambdaProcessor.convertLambdaResponseToEvent(buffer, invokeResponse);
         // Assert
         // Verify that three records are added to the result
         assertEquals(3, resultRecords.size(), "ResultRecords should contain three records.");
@@ -541,7 +472,7 @@ public class LambdaProcessorTest {
         when(invokeResponse.payload()).thenReturn(lambdaReponse);
         when(invokeResponse.statusCode()).thenReturn(200); // Success status code
 
-        int randomCount = (int) (Math.random() * 10);
+        int randomCount = (int) (Math.random() * 10) + 1;
         List<Record<Event>> originalRecords = getSampleEventRecords(randomCount);
         Buffer buffer = new InMemoryBuffer(lambdaProcessorConfig.getBatchOptions().getKeyName());
         for (Record<Event> originalRecord : originalRecords) {
