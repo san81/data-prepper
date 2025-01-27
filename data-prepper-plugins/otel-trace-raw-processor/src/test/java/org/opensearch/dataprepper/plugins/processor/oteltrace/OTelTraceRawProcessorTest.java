@@ -65,26 +65,66 @@ class OTelTraceRawProcessorTest {
     private static final String TEST_TRACE_GROUP_2_ROOT_SPAN_JSON_FILE = "trace-group-2-root-span.json";
     private static final String TEST_TRACE_GROUP_2_CHILD_SPAN_1_JSON_FILE = "trace-group-2-child-span-1.json";
     private static final String TEST_TRACE_GROUP_2_CHILD_SPAN_2_JSON_FILE = "trace-group-2-child-span-2.json";
-
+    public OTelTraceRawProcessor oTelTraceRawProcessor;
+    public ExecutorService executorService;
     private Span TEST_TRACE_GROUP_1_ROOT_SPAN;
     private Span TEST_TRACE_GROUP_1_CHILD_SPAN_1;
     private Span TEST_TRACE_GROUP_1_CHILD_SPAN_2;
     private Span TEST_TRACE_GROUP_2_ROOT_SPAN;
     private Span TEST_TRACE_GROUP_2_CHILD_SPAN_1;
     private Span TEST_TRACE_GROUP_2_CHILD_SPAN_2;
-
     private List<Record<Span>> TEST_ONE_FULL_TRACE_GROUP_RECORDS;
     private List<Record<Span>> TEST_ONE_TRACE_GROUP_MISSING_ROOT_RECORDS;
     private List<Record<Span>> TEST_TWO_FULL_TRACE_GROUP_RECORDS;
     private List<Record<Span>> TEST_TWO_TRACE_GROUP_INTERLEAVED_PART_1_RECORDS;
     private List<Record<Span>> TEST_TWO_TRACE_GROUP_INTERLEAVED_PART_2_RECORDS;
     private List<Record<Span>> TEST_TWO_TRACE_GROUP_MISSING_ROOT_RECORDS;
-
     private OtelTraceRawProcessorConfig config;
     private PluginMetrics pluginMetrics;
-    public OTelTraceRawProcessor oTelTraceRawProcessor;
-    public ExecutorService executorService;
     private PipelineDescription pipelineDescription;
+
+    private static Span buildSpanFromJsonFile(final String jsonFileName) {
+        JacksonSpan.Builder spanBuilder = JacksonSpan.builder();
+        try (final InputStream inputStream = Objects.requireNonNull(
+                OTelTraceRawProcessorTest.class.getClassLoader().getResourceAsStream(jsonFileName))) {
+            final Map<String, Object> spanMap = OBJECT_MAPPER.readValue(inputStream, new TypeReference<Map<String, Object>>() {
+            });
+            final String traceId = (String) spanMap.get("traceId");
+            final String spanId = (String) spanMap.get("spanId");
+            final String parentSpanId = (String) spanMap.get("parentSpanId");
+            final String traceState = (String) spanMap.get("traceState");
+            final String name = (String) spanMap.get("name");
+            final String kind = (String) spanMap.get("kind");
+            final Long durationInNanos = ((Number) spanMap.get("durationInNanos")).longValue();
+            final String startTime = (String) spanMap.get("startTime");
+            final String endTime = (String) spanMap.get("endTime");
+            spanBuilder = spanBuilder
+                    .withTraceId(traceId)
+                    .withSpanId(spanId)
+                    .withParentSpanId(parentSpanId)
+                    .withTraceState(traceState)
+                    .withName(name)
+                    .withKind(kind)
+                    .withDurationInNanos(durationInNanos)
+                    .withStartTime(startTime)
+                    .withEndTime(endTime)
+                    .withTraceGroup(null);
+            DefaultTraceGroupFields.Builder traceGroupFieldsBuilder = DefaultTraceGroupFields.builder();
+            if (parentSpanId.isEmpty()) {
+                final Integer statusCode = (Integer) ((Map<String, Object>) spanMap.get("traceGroupFields")).get("statusCode");
+                traceGroupFieldsBuilder = traceGroupFieldsBuilder
+                        .withStatusCode(statusCode)
+                        .withEndTime(endTime)
+                        .withDurationInNanos(durationInNanos);
+                final String traceGroup = (String) spanMap.get("traceGroup");
+                spanBuilder = spanBuilder.withTraceGroup(traceGroup);
+            }
+            spanBuilder.withTraceGroupFields(traceGroupFieldsBuilder.build());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return spanBuilder.build();
+    }
 
     @BeforeEach
     void setup() {
@@ -252,7 +292,7 @@ class OTelTraceRawProcessorTest {
 
     @ParameterizedTest
     @CsvSource({
-            "1, 4",
+            "0, 4",
             "2, 6"
     })
     void traceGroupCacheMaxSize_provides_an_upper_bound(final long cacheMaxSize, final int expectedProcessedRecords) {
@@ -293,48 +333,6 @@ class OTelTraceRawProcessorTest {
         MatcherAssert.assertThat(getMissingTraceGroupFieldsSpanCount(processedRecords), equalTo(0));
     }
 
-    private static Span buildSpanFromJsonFile(final String jsonFileName) {
-        JacksonSpan.Builder spanBuilder = JacksonSpan.builder();
-        try (final InputStream inputStream = Objects.requireNonNull(
-                OTelTraceRawProcessorTest.class.getClassLoader().getResourceAsStream(jsonFileName))){
-            final Map<String, Object> spanMap = OBJECT_MAPPER.readValue(inputStream, new TypeReference<Map<String, Object>>() {});
-            final String traceId = (String) spanMap.get("traceId");
-            final String spanId = (String) spanMap.get("spanId");
-            final String parentSpanId = (String) spanMap.get("parentSpanId");
-            final String traceState = (String) spanMap.get("traceState");
-            final String name = (String) spanMap.get("name");
-            final String kind = (String) spanMap.get("kind");
-            final Long durationInNanos = ((Number) spanMap.get("durationInNanos")).longValue();
-            final String startTime = (String) spanMap.get("startTime");
-            final String endTime = (String) spanMap.get("endTime");
-            spanBuilder = spanBuilder
-                    .withTraceId(traceId)
-                    .withSpanId(spanId)
-                    .withParentSpanId(parentSpanId)
-                    .withTraceState(traceState)
-                    .withName(name)
-                    .withKind(kind)
-                    .withDurationInNanos(durationInNanos)
-                    .withStartTime(startTime)
-                    .withEndTime(endTime)
-                    .withTraceGroup(null);
-            DefaultTraceGroupFields.Builder traceGroupFieldsBuilder = DefaultTraceGroupFields.builder();
-            if (parentSpanId.isEmpty()) {
-                final Integer statusCode = (Integer) ((Map<String, Object>) spanMap.get("traceGroupFields")).get("statusCode");
-                traceGroupFieldsBuilder = traceGroupFieldsBuilder
-                        .withStatusCode(statusCode)
-                        .withEndTime(endTime)
-                        .withDurationInNanos(durationInNanos);
-                final String traceGroup = (String) spanMap.get("traceGroup");
-                spanBuilder = spanBuilder.withTraceGroup(traceGroup);
-            }
-            spanBuilder.withTraceGroupFields(traceGroupFieldsBuilder.build());
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        return spanBuilder.build();
-    }
-
     private List<Future<Collection<Record<Span>>>> submitRecords(Collection<Record<Span>> records) {
         final List<Future<Collection<Record<Span>>>> futures = new ArrayList<>();
         futures.add(executorService.submit(() -> oTelTraceRawProcessor.doExecute(records)));
@@ -343,7 +341,7 @@ class OTelTraceRawProcessorTest {
 
     private int getMissingTraceGroupFieldsSpanCount(final Collection<Record<Span>> records) {
         int count = 0;
-        for (Record<Span> record: records) {
+        for (Record<Span> record : records) {
             final Span span = record.getData();
             final String traceGroup = span.getTraceGroup();
             final TraceGroupFields traceGroupFields = span.getTraceGroupFields();
