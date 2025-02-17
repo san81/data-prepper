@@ -28,19 +28,21 @@ import java.util.concurrent.Executors;
 @Named
 public class DataPrepperServer {
     private static final Logger LOG = LoggerFactory.getLogger(DataPrepperServer.class);
+    private HttpServer server;
     private final HttpServerProvider serverProvider;
     private final ListPipelinesHandler listPipelinesHandler;
     private final GetPipelinesHandler getPipelinesHandler;
+    private final UpdatePipelineConfigHandler updatePipelineConfigHandler;
     private final ShutdownHandler shutdownHandler;
     private final PrometheusMeterRegistry prometheusMeterRegistry;
     private final Authenticator authenticator;
     private final ExecutorService executorService;
-    private HttpServer server;
 
     @Inject
     public DataPrepperServer(
             final HttpServerProvider serverProvider,
             final ListPipelinesHandler listPipelinesHandler,
+            final UpdatePipelineConfigHandler updatePipelineConfigHandler,
             final ShutdownHandler shutdownHandler,
             final GetPipelinesHandler getPipelinesHandler,
             @Autowired(required = false) @Nullable final PrometheusMeterRegistry prometheusMeterRegistry,
@@ -49,6 +51,7 @@ public class DataPrepperServer {
         this.serverProvider = serverProvider;
         this.listPipelinesHandler = listPipelinesHandler;
         this.shutdownHandler = shutdownHandler;
+        this.updatePipelineConfigHandler = updatePipelineConfigHandler;
         this.getPipelinesHandler = getPipelinesHandler;
         this.prometheusMeterRegistry = prometheusMeterRegistry;
         this.authenticator = authenticator;
@@ -71,6 +74,7 @@ public class DataPrepperServer {
         createContext(server, listPipelinesHandler, authenticator, "/list");
         createContext(server, shutdownHandler, authenticator, "/shutdown");
         createContext(server, getPipelinesHandler, authenticator, "/pipelines");
+        createContext(server, updatePipelineConfigHandler, authenticator, "/update_config");
 
         if (prometheusMeterRegistry != null) {
             final PrometheusMetricsHandler prometheusMetricsHandler = new PrometheusMetricsHandler(prometheusMeterRegistry);
@@ -84,7 +88,7 @@ public class DataPrepperServer {
             final HttpServer httpServer,
             final HttpHandler httpHandler,
             @Nullable final Authenticator authenticator,
-            final String ... paths
+            final String... paths
     ) {
         for (final String path : paths) {
             final HttpContext context = httpServer.createContext(path, httpHandler);
