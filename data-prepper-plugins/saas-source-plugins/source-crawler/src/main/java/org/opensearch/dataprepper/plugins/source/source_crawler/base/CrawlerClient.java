@@ -25,7 +25,7 @@ public interface CrawlerClient {
      * @return returns an {@link Iterator} of {@link ItemInfo}
      */
     Iterator<ItemInfo> listItems(Instant lastPollTime);
-    
+
 
     /**
      * Method for executing a particular partition or a chunk of work
@@ -35,4 +35,5 @@ public interface CrawlerClient {
      * @param acknowledgementSet acknowledgement set to be used to track the completion of the partition
      */
     void executePartition(SaasWorkerProgressState state, Buffer<Record<Event>> buffer, AcknowledgementSet acknowledgementSet);
+    
 }

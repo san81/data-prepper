@@ -10,17 +10,13 @@
 
 package org.opensearch.dataprepper.plugins.source.jira;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.annotations.VisibleForTesting;
-import org.opensearch.dataprepper.model.acknowledgements.AcknowledgementSet;
-import org.opensearch.dataprepper.model.buffer.Buffer;
 import org.opensearch.dataprepper.model.event.Event;
-import org.opensearch.dataprepper.model.event.EventType;
-import org.opensearch.dataprepper.model.event.JacksonEvent;
 import org.opensearch.dataprepper.model.record.Record;
-import org.opensearch.dataprepper.plugins.source.source_crawler.base.CrawlerClient;
+import org.opensearch.dataprepper.plugins.source.atlassian.base.DefaultCrawlerClient;
 import org.opensearch.dataprepper.plugins.source.source_crawler.base.CrawlerSourceConfig;
 import org.opensearch.dataprepper.plugins.source.source_crawler.base.PluginExecutorServiceProvider;
 import org.opensearch.dataprepper.plugins.source.source_crawler.coordination.state.SaasWorkerProgressState;
@@ -29,7 +25,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.inject.Named;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -37,17 +32,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
-import static java.util.concurrent.CompletableFuture.supplyAsync;
 import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.PROJECT;
 
 /**
  * This class represents a Jira client.
  */
 @Named
-public class JiraClient implements CrawlerClient {
+public class JiraClient extends DefaultCrawlerClient {
 
     private static final Logger log = LoggerFactory.getLogger(JiraClient.class);
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -61,6 +53,7 @@ public class JiraClient implements CrawlerClient {
                       JiraIterator jiraIterator,
                       PluginExecutorServiceProvider executorServiceProvider,
                       JiraSourceConfig sourceConfig) {
+        super(sourceConfig);
         this.service = service;
         this.jiraIterator = jiraIterator;
         this.executorService = executorServiceProvider.get();
@@ -73,17 +66,7 @@ public class JiraClient implements CrawlerClient {
         return jiraIterator;
     }
 
-    @VisibleForTesting
-    void injectObjectMapper(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
-    }
-
-    @Override
-    public void executePartition(SaasWorkerProgressState state,
-                                 Buffer<Record<Event>> buffer,
-                                 AcknowledgementSet acknowledgementSet) {
-        log.trace("Executing the partition: {} with {} ticket(s)",
-                state.getKeyAttributes(), state.getItemIds().size());
+    public List<ItemInfo> getListOfItemInfosFromState(SaasWorkerProgressState state) {
         List<String> itemIds = state.getItemIds();
         Map<String, Object> keyAttributes = state.getKeyAttributes();
         String project = (String) keyAttributes.get(PROJECT);
@@ -101,40 +84,27 @@ public class JiraClient implements CrawlerClient {
                     .withMetadata(keyAttributes).build();
             itemInfos.add(itemInfo);
         }
-
-        String eventType = EventType.DOCUMENT.toString();
-        List<Record<Event>> recordsToWrite = itemInfos
-                .parallelStream()
-                .map(t -> (Supplier<String>) (() -> service.getIssue(t.getId())))
-                .map(supplier -> supplyAsync(supplier, this.executorService))
-                .map(CompletableFuture::join)
-                .map(ticketJson -> {
-                    try {
-                        return objectMapper.readValue(ticketJson, new TypeReference<>() {
-                        });
-                    } catch (JsonProcessingException e) {
-                        throw new RuntimeException(e);
-                    }
-                })
-                .map(t -> (Event) JacksonEvent.builder()
-                        .withEventType(eventType)
-                        .withData(t)
-                        .build())
-                .map(Record::new)
-                .peek(record -> record.getData().getMetadata().setAttribute(PROJECT, project.toLowerCase()))
-                .collect(Collectors.toList());
-
-        try {
-            if (configuration.isAcknowledgments()) {
-                recordsToWrite.forEach(eventRecord -> acknowledgementSet.add(eventRecord.getData()));
-                buffer.writeAll(recordsToWrite, (int) Duration.ofSeconds(bufferWriteTimeoutInSeconds).toMillis());
-                acknowledgementSet.complete();
-            } else {
-                buffer.writeAll(recordsToWrite, (int) Duration.ofSeconds(bufferWriteTimeoutInSeconds).toMillis());
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-
+        return itemInfos;
     }
+
+    public CompletableFuture<Record<Event>> processItemAsync(ItemInfo item) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String contentJson = service.getIssue(item.getId());
+                ObjectNode contentJsonObj = objectMapper.readValue(contentJson, new TypeReference<>() {
+                });
+                Record<Event> record = new Record<>(createEvent(contentJsonObj));
+                record.getData().getMetadata().setAttribute(PROJECT, ((JiraItemInfo) item).getProject().toLowerCase());
+                return record;
+            } catch (Exception e) {
+                return new Record<>(createErrorEvent(item, e));
+            }
+        }, executorService);
+    }
+
+    @VisibleForTesting
+    void injectObjectMapper(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
+
 }
