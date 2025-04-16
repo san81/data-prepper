@@ -21,8 +21,6 @@ import org.opensearch.dataprepper.plugins.source.source_crawler.base.CrawlerSour
 import org.opensearch.dataprepper.plugins.source.source_crawler.base.PluginExecutorServiceProvider;
 import org.opensearch.dataprepper.plugins.source.source_crawler.coordination.state.SaasWorkerProgressState;
 import org.opensearch.dataprepper.plugins.source.source_crawler.model.ItemInfo;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.inject.Named;
 import java.time.Instant;
@@ -41,13 +39,11 @@ import static org.opensearch.dataprepper.plugins.source.jira.utils.Constants.PRO
 @Named
 public class JiraClient extends DefaultCrawlerClient {
 
-    private static final Logger log = LoggerFactory.getLogger(JiraClient.class);
     private ObjectMapper objectMapper = new ObjectMapper();
     private final JiraService service;
     private final JiraIterator jiraIterator;
     private final ExecutorService executorService;
     private final CrawlerSourceConfig configuration;
-    private final int bufferWriteTimeoutInSeconds = 10;
 
     public JiraClient(JiraService service,
                       JiraIterator jiraIterator,

@@ -23,8 +23,6 @@ import org.opensearch.dataprepper.plugins.source.source_crawler.base.CrawlerSour
 import org.opensearch.dataprepper.plugins.source.source_crawler.base.PluginExecutorServiceProvider;
 import org.opensearch.dataprepper.plugins.source.source_crawler.coordination.state.SaasWorkerProgressState;
 import org.opensearch.dataprepper.plugins.source.source_crawler.model.ItemInfo;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.inject.Named;
 import java.time.Instant;
@@ -43,7 +41,6 @@ import static org.opensearch.dataprepper.plugins.source.confluence.utils.Constan
 @Named
 public class ConfluenceClient extends DefaultCrawlerClient {
 
-    private static final Logger log = LoggerFactory.getLogger(ConfluenceClient.class);
     private ObjectMapper objectMapper = new ObjectMapper();
     private final ConfluenceService service;
     private final ConfluenceIterator confluenceIterator;
