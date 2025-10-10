@@ -34,6 +34,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import static org.opensearch.dataprepper.logging.DataPrepperMarkers.EVENT;
 import static org.opensearch.dataprepper.logging.DataPrepperMarkers.NOISY;
 
@@ -45,6 +47,7 @@ public class TranslateProcessor extends AbstractProcessor<Record<Event>, Record<
     private final List<MappingsParameterConfig> mappingsConfig;
     private final JacksonEvent.Builder eventBuilder = JacksonEvent.builder();
     private final JsonExtractor jsonExtractor = new JsonExtractor();
+    private final JsonPointerExtractor jsonPointerExtractor;
     private final KeyResolver keyResolver;
 
     @DataPrepperPluginConstructor
@@ -57,6 +60,7 @@ public class TranslateProcessor extends AbstractProcessor<Record<Event>, Record<
         this.expressionEvaluator = expressionEvaluator;
         this.mappingsConfig = translateProcessorConfig.getCombinedMappingsConfigs();
         this.keyResolver = new CachingKeyResolver(eventKeyFactory);
+        this.jsonPointerExtractor = new JsonPointerExtractor(new ObjectMapper());
         Optional.ofNullable(mappingsConfig)
                 .ifPresent(configs -> configs.forEach(MappingsParameterConfig::parseMappings));
     }
@@ -125,11 +129,20 @@ public class TranslateProcessor extends AbstractProcessor<Record<Event>, Record<
         if (rootKey == null || !recordEvent.containsKey(rootKey)) {
             return;
         }
-        Map<String, Object> recordObject = recordEvent.toMap();
-        List<Object> targetObjects = jsonExtractor.getObjectFromPath(commonPath, recordObject);
+        
+        // OPTIMAL HYBRID: JsonPointer for reading, original for writing - best performance
+        List<Object> targetObjects = jsonPointerExtractor.getObjectFromPath(commonPath, recordEvent.getJsonNode());
         if(!targetObjects.isEmpty()) {
+            // Modify objects in-place (existing logic)
             targetObjects.forEach(targetObj -> performMappings(targetObj, sourceKeys, sourceObject, targetConfig));
-            recordEvent.put(rootKey, recordObject.get(rootField));
+            
+            // Use original approach for write-back - proven fastest
+            Map<String, Object> recordObject = recordEvent.toMap();
+            List<Object> mapTargetObjects = jsonExtractor.getObjectFromPath(commonPath, recordObject);
+            if (!mapTargetObjects.isEmpty()) {
+                mapTargetObjects.forEach(targetObj -> performMappings(targetObj, sourceKeys, sourceObject, targetConfig));
+                recordEvent.put(rootKey, recordObject.get(rootField));
+            }
         }
     }
 
