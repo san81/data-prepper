@@ -350,6 +350,46 @@ task release {
     }
 }
 
+tasks.register('detectDependencyConflicts') {
+    doLast {
+        def conflicts = [:]
+        def duplicates = [:]
+
+        // Check all configurations
+        configurations.each { config ->
+            if (config.canBeResolved) {
+                try {
+                    config.resolvedConfiguration.resolvedArtifacts.each { artifact ->
+                        def key = "${artifact.moduleVersion.id.group}:${artifact.name}"
+                        def version = artifact.moduleVersion.id.version
+
+                        if (conflicts.containsKey(key)) {
+                            if (conflicts[key] != version) {
+                                duplicates[key] = [conflicts[key], version]
+                            }
+                        } else {
+                            conflicts[key] = version
+                        }
+                    }
+                } catch (Exception e) {
+                    println "Could not resolve ${config.name}: ${e.message}"
+                }
+            }
+        }
+
+        // Report conflicts
+        if (!duplicates.isEmpty()) {
+            println "\n=== DEPENDENCY CONFLICTS DETECTED ==="
+            duplicates.each { lib, versions ->
+                println "❌ ${lib}: ${versions.join(' vs ')}"
+            }
+            throw new GradleException("Dependency conflicts found!")
+        } else {
+            println "✅ No dependency conflicts detected"
+        }
+    }
+}
+
 // Iterate over each core project and collect 'assemble' and 'publish' tasks recursively from them and their nested subprojects
 coreProjects.each { coreProject ->
     // Ensure that the core project and its subprojects are evaluated
@@ -363,4 +403,5 @@ coreProjects.each { coreProject ->
     def releaseTask = tasks.named('release').get()
     releaseTask.dependsOn assembleTasks
     releaseTask.dependsOn publishTasks
+    build.dependsOn detectDependencyConflicts
 }
