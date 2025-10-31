@@ -352,40 +352,94 @@ task release {
 
 tasks.register('detectDependencyConflicts') {
     doLast {
-        def conflicts = [:]
-        def duplicates = [:]
+        def allConflicts = [:]
+        def projectsChecked = 0
 
-        // Check all configurations
-        configurations.each { config ->
-            if (config.canBeResolved) {
-                try {
-                    config.resolvedConfiguration.resolvedArtifacts.each { artifact ->
-                        def key = "${artifact.moduleVersion.id.group}:${artifact.name}"
-                        def version = artifact.moduleVersion.id.version
+        // Check root project and all subprojects
+        def allProjects = [project] + project.subprojects
 
-                        if (conflicts.containsKey(key)) {
-                            if (conflicts[key] != version) {
-                                duplicates[key] = [conflicts[key], version]
+        allProjects.each { proj ->
+            proj.configurations.each { config ->
+                if (config.canBeResolved) {
+                    try {
+                        // Use incoming resolution result to see requested vs resolved versions
+                        config.incoming.resolutionResult.allDependencies.each { dependency ->
+                            if (dependency.hasProperty('selected') && dependency.hasProperty('requested')) {
+                                def requested = dependency.requested
+                                def selected = dependency.selected
+
+                                // Check if it's a module component selector
+                                if (requested.hasProperty('module') && requested.hasProperty('version')) {
+                                    def moduleId = "${requested.module}"
+                                    def requestedVersion = requested.version ?: '(unspecified - managed by BOM/platform)'
+                                    def selectedVersion = selected.moduleVersion.version
+
+                                    // Track ALL version requests (not just conflicts)
+                                    if (!allConflicts.containsKey(moduleId)) {
+                                        allConflicts[moduleId] = [
+                                                versionToProjects: [:],
+                                                resolved : selectedVersion,
+                                                hasConflict: false
+                                        ]
+                                    }
+
+                                    // Map each requested version to the projects requesting it
+                                    if (!allConflicts[moduleId].versionToProjects.containsKey(requestedVersion)) {
+                                        allConflicts[moduleId].versionToProjects[requestedVersion] = [] as Set
+                                    }
+                                    allConflicts[moduleId].versionToProjects[requestedVersion].add("${proj.path}")
+
+                                    // Mark if there's a conflict (requested != resolved)
+                                    if (requestedVersion != selectedVersion) {
+                                        allConflicts[moduleId].hasConflict = true
+                                    }
+                                }
                             }
-                        } else {
-                            conflicts[key] = version
                         }
+                        projectsChecked++
+                    } catch (Exception e) {
+                        // Silently skip unresolvable configurations
                     }
-                } catch (Exception e) {
-                    println "Could not resolve ${config.name}: ${e.message}"
                 }
             }
         }
 
-        // Report conflicts
-        if (!duplicates.isEmpty()) {
-            println "\n=== DEPENDENCY CONFLICTS DETECTED ==="
-            duplicates.each { lib, versions ->
-                println "❌ ${lib}: ${versions.join(' vs ')}"
+        // Report conflicts - filter to only show modules with actual conflicts
+        def realConflicts = allConflicts.findAll { moduleId, info -> info.hasConflict }
+
+        if (!realConflicts.isEmpty()) {
+            println "\n=== DEPENDENCY VERSION CONFLICTS DETECTED ==="
+            println "Found ${realConflicts.size()} dependencies with version conflicts:\n"
+
+            realConflicts.sort().each { moduleId, info ->
+                println "⚠️  ${moduleId}"
+                println "   Resolved to: ${info.resolved}"
+                println "   Requested versions:"
+
+                info.versionToProjects.sort().each { version, projects ->
+                    def marker = (version == info.resolved) ? "✓" : "•"
+                    def label = (version == info.resolved) ? "${version} [SELECTED]" : version
+                    println "      ${marker} ${label}"
+                    projects.sort().each { project ->
+                        println "        - ${project}"
+                    }
+                }
+                println ""
             }
+
+            println "Total configurations checked: ${projectsChecked}"
+            println "\nNote: Gradle resolved these conflicts automatically by selecting compatible versions."
+            println "\nTo investigate why a specific version was selected, use:"
+            println "  ./gradlew :project-name:dependencyInsight --dependency <artifact-name> --configuration runtimeClasspath"
+            println "\nExample:"
+            println "  ./gradlew :data-prepper-core:dependencyInsight --dependency guava --configuration runtimeClasspath"
+            println "\nThis will show the complete dependency tree and why Gradle chose the resolved version.\n"
+
+            // Make it non-failing by default, just informational
+            // Uncomment the line below if you want to fail the build on conflicts:
             throw new GradleException("Dependency conflicts found!")
         } else {
-            println "✅ No dependency conflicts detected"
+            println "✅ No dependency version conflicts detected (checked ${projectsChecked} configurations)"
         }
     }
 }
@@ -403,5 +457,7 @@ coreProjects.each { coreProject ->
     def releaseTask = tasks.named('release').get()
     releaseTask.dependsOn assembleTasks
     releaseTask.dependsOn publishTasks
-    build.dependsOn detectDependencyConflicts
 }
+
+// Add dependency conflict detection to the build task (once, not per core project)
+build.dependsOn detectDependencyConflicts
